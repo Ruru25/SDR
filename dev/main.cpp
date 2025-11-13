@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <complex.h>
 #include <cmath>
+#include "head.h"
 
 int16_t *read_pcm(const char *filename, size_t *sample_count)
 {
@@ -65,7 +66,7 @@ int main(){
     size_t channels[] = {0};
     // Настройки усилителей на RXTX
     SoapySDRDevice_setGain(sdr, SOAPY_SDR_RX, channels[0], 10.0); // Чувствительность приемника
-    SoapySDRDevice_setGain(sdr, SOAPY_SDR_TX, channels[0], -50.0);// Усиление передатчика
+    SoapySDRDevice_setGain(sdr, SOAPY_SDR_TX, channels[0], -30.0);// Усиление переда0тчика
 
     //Инициализация потоков (stream) для передачи и примема сэмплов:
 
@@ -82,8 +83,8 @@ int main(){
     size_t rx_mtu = SoapySDRDevice_getStreamMTU(sdr, rxStream);
     size_t tx_mtu = SoapySDRDevice_getStreamMTU(sdr, txStream);
 
-    size_t sample_count = 0;
-    int16_t *my_file = read_pcm("/home/sceptik/SDR/dev/pcm_music.pcm", &sample_count);
+    //size_t sample_count = 0;
+    //int16_t *my_file = read_pcm("/home/iluha/sdr_practice/dev/pcm_music.pcm", &sample_count);
 
     // Выделяем память под буферы RX и TX
     int16_t tx_buff[2 *tx_mtu];
@@ -91,14 +92,45 @@ int main(){
 
     int cur_sample_in_file = 0;
 
-    FILE *file = fopen("txdata.pcm", "w");
-    FILE *file1 = fopen("rxdata.pcm", "w");
+    FILE *file = fopen("txdata1.pcm", "w");
+    FILE *file1 = fopen("rxdata1.pcm", "w");
 
     long long timeoutUs = 100000;
     long long last_time = 0;
 
-    // Начинается работа с получением и отправкой сэмплов
-    for (size_t buffers_read = 0; buffers_read < sample_count; buffers_read++)
+    vector<int16_t> my_samples = my_ready_samples();
+
+    for(int i = 0; i < my_samples.size(); i++){
+        my_samples[i] = my_samples[i] * (2047<<4);
+    }
+
+
+    size_t sample_count = my_samples.size();
+    int16_t my_buff[sample_count];
+
+    for(int i = 0; i < sample_count; i++){
+        my_buff[i] = my_samples[i];
+        printf("%d , ", my_buff[i]);
+        if(i % 10 == 0){
+            printf("\n");
+        }
+        // if(i < 100){
+        //     printf("%d , ", my_buff[i]);
+        // }
+    }
+    int16_t my_tx_buff[2 *tx_mtu];
+    for(int i = 0; i < 2 * tx_mtu; i ++){
+        my_tx_buff[i] = my_buff[i];
+        if(i < 100){
+            printf("%d , ", my_buff[i]);
+        }
+        fwrite(my_tx_buff, 2* tx_mtu * sizeof(int16_t), 1, file1);
+    }
+    //fwrite(my_buff, sample_count * sizeof(int16_t), 1, file1);
+    // Начинается работа с получением и отпра   вкой сэмплов
+
+    printf("my_sample size : %d\n\n", my_samples.size());
+    for (size_t buffers_read = 0; buffers_read < 10; buffers_read++)
     {
         void *rx_buffs[] = {rx_buffer};
         int flags;       
@@ -109,19 +141,20 @@ int main(){
         
         if(buffers_read > 0){
             fwrite(rx_buffer, 2* rx_mtu * sizeof(int16_t), 1, file);
+            printf("Buffer: %lu - Samples: %i, Flags: %i, Time: %lli, TimeDiff: %lli \n", buffers_read, sr, flags, timeNs, timeNs - last_time);
+            last_time = timeNs;
         }
 
         // Смотрим на количество считаных сэмплов, времени прихода и разницы во времени с чтением прошлого буфера
-        printf("Buffer: %lu - Samples: %i, Flags: %i, Time: %lli, TimeDiff: %lli \n", buffers_read, sr, flags, timeNs, timeNs - last_time);
-        last_time = timeNs;
+        
 
-        for (int i = 0; i < 2 * tx_mtu; i ++)
+        for (int i = 0; i < 2 * tx_mtu; i +=2)
         {
             if (cur_sample_in_file < sample_count) 
             {
-                tx_buff[i] = my_file[cur_sample_in_file];    
-                tx_buff[i+1] = my_file[cur_sample_in_file];  
-                cur_sample_in_file++;
+                tx_buff[i] = my_buff[cur_sample_in_file];    
+                tx_buff[i+1] = my_buff[cur_sample_in_file+1];  
+                cur_sample_in_file+=2;
             }
             else
             {
@@ -163,8 +196,9 @@ int main(){
         // Здесь отправляем наш tx_buff массив
         void *tx_buffs[] = {tx_buff};
         flags = SOAPY_SDR_HAS_TIME;
+    
         int st = SoapySDRDevice_writeStream(sdr, txStream, (const void * const*)tx_buffs, tx_mtu, &flags, tx_time, timeoutUs);
-        fwrite(tx_buff, 2* tx_mtu * sizeof(int16_t), 1, file1);
+        //fwrite(tx_buff, 2* tx_mtu * sizeof(int16_t), 1, file1);
         
         if ((size_t)st != tx_mtu)
         {
